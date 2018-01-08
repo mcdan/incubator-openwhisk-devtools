@@ -2,7 +2,8 @@ UNAME_STR ?= $(shell uname)
 
 # detect local ip of host as this is needed within containers to find the openwhisk API container
 ifeq ("$(UNAME_STR)","Linux")
-	LOCAL_IP=$(shell route | grep default | tr -s " " | cut -d " " -f 8 | xargs ifconfig | grep "inet addr:" | cut -d ":" -f 2 | cut -d " " -f 1)
+	# Get the default route line | squish down repeating spaces | cut that line getting the adapters | get just the first one(!) | get that adapters IP | get just the "inet " section | cut line on the subnet "/" | cut at t to drop the inet part | remove all the spaces
+	LOCAL_IP=$(shell route | grep default | tr -s ' ' | cut -d ' ' -f 8 | head -n 1 | xargs ip addr list | grep "inet " | cut -d "/" -f 1 | cut -d "t" -f 2 | tr -d ' ')
 else
 	LOCAL_IP ?= $(shell ifconfig | grep "inet " | grep -v 127.0.0.1 | cut -d\  -f2 | head -1)
 	# if no IP was found, fallback to "localhost"
