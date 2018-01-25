@@ -20,3 +20,4 @@ then
     sudo mv $DOCKER_COMPOSE_TMP /usr/local/bin/$DOCKER_COMPOSE
 fi
 echo "Docker Compose Version:" `docker-compose --version`
+docker --version
