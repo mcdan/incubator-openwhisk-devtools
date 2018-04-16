@@ -1,4 +1,5 @@
 UNAME_STR ?= $(shell uname)
+PROC_VERSION = $(shell cat /proc/version)
 
 # detect local ip of host as this is needed within containers to find the openwhisk API container
 ifeq ("$(UNAME_STR)","Linux")
@@ -11,6 +12,26 @@ else
 	endif
 endif
 
+ifneq (,$(findstring Microsoft,$(PROC_VERSION)))
+  DOCKER_BINARY = "docker.exe"
+  COMPOSE_BINARY = "docker-compose.exe"
+  IS_WINDOWS ="y"
+else
+  IS_WINDOWS = "n"
+  ifeq ("$(UNAME_STR)","Linux")
+    DOCKER_BINARY ?= $(shell (which $(DOCKER_BINARY)))
+  else 
+    DOCKER_BINARY ?= $(shell if [[ $(DOCKER_KERNEL) == *-moby || $(DOCKER_KERNEL) ==  *-boot2$(DOCKER_BINARY) ]]; then ($(DOCKER_BINARY) run --rm --privileged --pid=host debian nsenter -t 1 -m -u -n -i sh -c "which docker"); else (which docker); fi)
+  endif
+endif
+
+BASE_SRC_MOUNT = $(shell dirname ~/tmp/openwhisk/src/ansible)
+ifeq ($(IS_WINDOWS), "y")
+    SOURCE_MOUNT := $(subst mnt,host_mnt,${BASE_SRC_MOUNT})
+  else
+    SOURCE_MOUNT := ${BASE_SRC_MOUNT}
+endif
+
 DOCKER_HOST_IP ?= $(shell echo ${DOCKER_HOST} | grep -o "[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}" || echo ${LOCAL_IP})
 DOCKER_REGISTRY ?= ""
 DOCKER_IMAGE_PREFIX ?= openwhisk
@@ -19,18 +40,14 @@ OPENWHISK_CATALOG_HOME ?= ./openwhisk-catalog
 WSK_CLI ?= $(OPENWHISK_PROJECT_HOME)/bin/wsk
 OPEN_WHISK_DB_PREFIX ?= local_
 
-DOCKER_KERNEL ?= $(shell docker version --format "{{.Server.KernelVersion}}")
-ifeq ("$(UNAME_STR)","Linux")
-	DOCKER_BINARY ?= $(shell (which docker))
-else 
-	DOCKER_BINARY ?= $(shell if [[ $(DOCKER_KERNEL) == *-moby || $(DOCKER_KERNEL) ==  *-boot2docker ]]; then (docker run --rm --privileged --pid=host debian nsenter -t 1 -m -u -n -i sh -c "which docker"); else (which docker); fi)
-endif
+DOCKER_KERNEL ?= $(shell $(DOCKER_BINARY) version --format "{{.Server.KernelVersion}}")
+
 ifndef VERBOSE
 .SILENT:
 endif
 
 # Quick-Start is a simple way to get started with OpenWhisk locally
-#   1. at start it builds the project and the docker containers
+#   1. at start it builds the project and the $(DOCKER_BINARY) containers
 #   2. then it starts all components using docker-compose
 #   3. it runs a sample hello-world function
 #   To stop and cleanup the environment use: make destroy
@@ -74,9 +91,9 @@ quick-start-info:
 	echo "$$(tput setaf 2)To stop openwhisk use: $$(tput setaf 4)make destroy$$(tput sgr0)"
 
 docker:
-	echo "building the docker images ... "
+	echo "building the $(DOCKER_BINARY) images ... "
 	cd $(OPENWHISK_PROJECT_HOME) && \
-		./gradlew distdocker -x :core:swift3Action:distDocker -x :core:swiftAction:distDocker
+		./gradlew dist$(DOCKER_BINARY) -x :core:swift3Action:dist$(DOCKER_BINARY) -x :core:swiftAction:distDocker
 
 download-cli:
 	echo "downloading the CLI tool ... "
@@ -158,33 +175,33 @@ restart: stop rm start-docker-compose
 
 .PHONY: restart-controller
 restart-controller:
-	$(shell cat ~/tmp/openwhisk/local.env) docker-compose --project-name openwhisk stop controller
-	$(shell cat ~/tmp/openwhisk/local.env) docker-compose --project-name openwhisk rm -f controller
-	$(shell cat ~/tmp/openwhisk/local.env) docker-compose --project-name openwhisk up controller 2>&1 >> ~/tmp/openwhisk/docker-compose.log &
+	$(shell cat ~/tmp/openwhisk/local.env) $(COMPOSE_BINARY) --project-name openwhisk stop controller
+	$(shell cat ~/tmp/openwhisk/local.env) $(COMPOSE_BINARY) --project-name openwhisk rm -f controller
+	$(shell cat ~/tmp/openwhisk/local.env) $(COMPOSE_BINARY) --project-name openwhisk up controller 2>&1 >> ~/tmp/openwhisk/docker-compose.log &
 	echo "waiting for the controller to see the invoker is 'up' ... "
 	until (curl --silent http://$(DOCKER_HOST_IP):8888/invokers | grep "up"); do printf '.'; sleep 5; done
 
 .PHONY: restart-invoker
 restart-invoker:
-	$(shell cat ~/tmp/openwhisk/local.env) docker-compose --project-name openwhisk stop invoker
-	$(shell cat ~/tmp/openwhisk/local.env) docker-compose --project-name openwhisk rm -f invoker
+	$(shell cat ~/tmp/openwhisk/local.env) $(COMPOSE_BINARY) --project-name openwhisk stop invoker
+	$(shell cat ~/tmp/openwhisk/local.env) $(COMPOSE_BINARY) --project-name openwhisk rm -f invoker
 	echo "waiting for the invoker to be marked 'down' ... "
 	until (curl --silent http://$(DOCKER_HOST_IP):8888/invokers | grep "down"); do printf '.'; sleep 5; done
-	$(shell cat ~/tmp/openwhisk/local.env) docker-compose --project-name openwhisk up invoker 2>&1 >> ~/tmp/openwhisk/docker-compose.log &
+	$(shell cat ~/tmp/openwhisk/local.env) $(COMPOSE_BINARY) --project-name openwhisk up invoker 2>&1 >> ~/tmp/openwhisk/docker-compose.log &
 	echo "waiting for the invoker to be marked Healthy ... "
 	until (curl --silent http://$(DOCKER_HOST_IP):8888/invokers | grep "up"); do printf '.'; sleep 5; done
 
 .PHONY: start-docker-compose
 start-docker-compose:
-	$(shell cat ~/tmp/openwhisk/local.env) docker-compose --project-name openwhisk up 2>&1 > ~/tmp/openwhisk/docker-compose.log &
+	$(shell cat ~/tmp/openwhisk/local.env) $(COMPOSE_BINARY) --project-name openwhisk up 2>&1 > ~/tmp/openwhisk/docker-compose.log &
 
 .PHONY: stop
 stop:
-	$(shell cat ~/tmp/openwhisk/local.env) docker-compose --project-name openwhisk stop
+	$(shell cat ~/tmp/openwhisk/local.env) $(COMPOSE_BINARY) --project-name openwhisk stop
 
 .PHONY: rm
 rm:
-	$(shell cat ~/tmp/openwhisk/local.env) docker-compose --project-name openwhisk rm -f
+	$(shell cat ~/tmp/openwhisk/local.env) $(COMPOSE_BINARY) --project-name openwhisk rm -f
 
 .PHONY: init-couchdb
 init-couchdb:
@@ -196,13 +213,13 @@ init-couchdb:
 	rm -rf ~/tmp/openwhisk/src
 	rsync -a $(OPENWHISK_PROJECT_HOME)/* ~/tmp/openwhisk/src --exclude .git --exclude build --exclude tests
 	echo 'Setting up db using ansible container....'; \
-    compose_network=$$(docker-compose --project-name openwhisk ps -q db 2>/dev/null | xargs docker inspect -f '{{range $$index, $$element := .NetworkSettings.Networks}}{{$$index}}{{end}}' | head -n 1); \
-    db_ip_address=$$(docker-compose --project-name openwhisk ps -q db 2>/dev/null | xargs docker inspect -f "{{.NetworkSettings.Networks.$${compose_network}.IPAddress}}"); \
-	docker run --rm -v ~/tmp/openwhisk/src:/openwhisk -w /openwhisk/ansible \
+    compose_network=$$($(COMPOSE_BINARY) --project-name openwhisk ps -q db 2>/dev/null | sed -e 's/\r//g' | xargs $(DOCKER_BINARY) inspect -f '{{range $$k, $$v := .NetworkSettings.Networks}}{{$$k}}{{end}}' | head -n 1); \
+    db_ip_address=$$($(COMPOSE_BINARY) --project-name openwhisk ps -q db 2>/dev/null | sed -e 's/\r//g' | xargs $(DOCKER_BINARY) inspect -f "{{.NetworkSettings.Networks.$${compose_network}.IPAddress}}"); \
+	$(DOCKER_BINARY) run --rm -v $(SOURCE_MOUNT):/openwhisk -w /openwhisk/ansible \
 		--network="$${compose_network}" -t \
 		--add-host="db:$${db_ip_address}" \
 		ddragosd/ansible:2.4.0.0-debian8  \
-		sh -c "ansible-playbook setup.yml && ansible-playbook couchdb.yml --tags=ini && ansible-playbook initdb.yml wipe.yml \
+		 	sh -c "ansible-playbook setup.yml && ansible-playbook couchdb.yml --tags=ini && ansible-playbook initdb.yml wipe.yml \
 			-e db_host=db -e openwhisk_home=/openwhisk -e db_prefix=$(OPEN_WHISK_DB_PREFIX)"
 
 .PHONY: init-whisk-cli
@@ -223,9 +240,9 @@ init-catalog:
 .PHONY: destroy
 destroy: stop rm
 	echo "cleaning other openwhisk containers started by the invoker ... "
-	docker ps | grep whisk | awk '{print $$1}' | xargs docker stop | xargs docker rm
-	echo "cleaning dangling docker volumes ... "
-	docker volume ls -qf dangling=true | xargs docker volume rm
+	$(DOCKER_BINARY) ps | grep whisk | awk '{print $$1}' | xargs $(DOCKER_BINARY) stop | xargs $(DOCKER_BINARY) rm
+	echo "cleaning dangling $(DOCKER_BINARY) volumes ... "
+	$(DOCKER_BINARY) volume ls -qf dangling=true | xargs $(DOCKER_BINARY) volume rm
 	if [ "$(UNAME_STR)" = "Linux" ]; then \
 	  sudo rm -rf ~/tmp/openwhisk ;\
 	else \
@@ -263,7 +280,7 @@ create-hello-world-function:
 hello-world-perf-test: create-hello-world-function
 	$(WSK_CLI) -i action create hello-perf hello.js
 
-	docker run \
+	$(DOCKER_BINARY) run \
 	    --net openwhisk_default \
 	    --link controller jordi/ab ab -k -n 2000 -c 20 \
 	    -m POST -H "Authorization:Basic MjNiYzQ2YjEtNzFmNi00ZWQ1LThjNTQtODE2YWE0ZjhjNTAyOjEyM3pPM3haQ0xyTU42djJCS0sxZFhZRnBYbFBrY2NPRnFtMTJDZEFzTWdSVTRWck5aOWx5R1ZDR3VNREdJd1A=" \
@@ -275,7 +292,7 @@ hello-world-perf-test: create-hello-world-function
 
 .PHONY: pull
 pull: download setup
-	docker-compose --project-name openwhisk pull
+	$(COMPOSE_BINARY) --project-name openwhisk pull
 
 # Optional package configuration stages. These commands will install and set up
 # the alarms, cloudant and kakfa packages.
@@ -322,9 +339,9 @@ $(addprefix install-package-,$(PACKAGES)):
 .PHONY: $(addprefix start-provider-,$(PACKAGES))
 $(addprefix start-provider-,$(PACKAGES)):
 	$(eval PACKAGE_NAME:= $(shell echo $(@) | cut -b 16-))
-	$(shell cat ~/tmp/openwhisk/providers.env) docker-compose -f docker-compose.yml -f docker-compose.packages.yml --project-name openwhisk up --no-recreate $(PACKAGE_NAME)provider 2>&1 > ~/tmp/openwhisk/docker-provider-compose.log &
+	$(shell cat ~/tmp/openwhisk/providers.env) $(COMPOSE_BINARY) -f docker-compose.yml -f docker-compose.packages.yml --project-name openwhisk up --no-recreate $(PACKAGE_NAME)provider 2>&1 > ~/tmp/openwhisk/docker-provider-compose.log &
 
 .PHONY: $(addprefix stop-provider-,$(PACKAGES))
 $(addprefix stop-provider-,$(PACKAGES)): setup-providers
 	$(eval PACKAGE_NAME:= $(shell echo $(@) | cut -b 15-))
-	$(shell cat ~/tmp/openwhisk/providers.env) docker-compose -f docker-compose.yml -f docker-compose.packages.yml --project-name openwhisk stop $(PACKAGE_NAME)provider
+	$(shell cat ~/tmp/openwhisk/providers.env) $(COMPOSE_BINARY) -f docker-compose.yml -f docker-compose.packages.yml --project-name openwhisk stop $(PACKAGE_NAME)provider

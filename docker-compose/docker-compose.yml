@@ -32,7 +32,6 @@ services:
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
       KAFKA_ADVERTISED_HOST_NAME: kafka
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
       - ~/tmp/openwhisk/kafka:/kafka:rw
 
   # WHISK CONTROLLER
@@ -116,9 +115,6 @@ services:
       WHISK_API_HOST_NAME: ${DOCKER_COMPOSE_HOST}
     volumes:
       - ~/tmp/openwhisk/invoker/logs:/logs
-      - /var/run/docker.sock:/var/run/docker.sock
-      - /var/lib/docker/containers:/containers
-      - /sys/fs/cgroup:/sys/fs/cgroup
     ports:
       - "8085:8085"
 
